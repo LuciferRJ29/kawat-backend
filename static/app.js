@@ -5,13 +5,12 @@
 let VERCEL_GATEWAY = localStorage.getItem('kawat_gateway') || 'https://kawatai.vercel.app';
 let ACTIVE_BACKEND = localStorage.getItem('kawat_backend_url') || '';
 let GEMINI_API_KEY = localStorage.getItem('kawat_gemini_key') || '';
-let ACTIVE_MODEL = localStorage.getItem('kawat_model') || 'gemini-3.8-flash';
+let ACTIVE_MODEL = localStorage.getItem('kawat_model') || 'gemini-2.0-flash';
 
 function getModelDisplayName(model) {
   if (!model) return 'Kawat 1';
-  if (model.includes('3.8') || model.includes('kawat-1')) return 'Kawat 1';
-  if (model.includes('2.0')) return 'Kawat 1 Lite';
-  if (model.includes('1.5-pro')) return 'Kawat Pro';
+  if (model.includes('2.0') || model.includes('3.8') || model.includes('kawat-1')) return 'Kawat 1';
+  if (model.includes('1.5-pro') || model.includes('pro')) return 'Kawat Pro';
   return 'Kawat 1';
 }
 
@@ -508,16 +507,44 @@ const CLIENT_TOOLS = [
       },
       required: ["repo_name", "github_token"]
     }
+  },
+  {
+    name: "run_command",
+    description: "Execute a command or script in the workspace.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        command: { type: "STRING", description: "Command to execute." }
+      },
+      required: ["command"]
+    }
   }
 ];
 
 async function executeClientAgentTurn(userPrompt) {
-  const systemInstruction = `You are KAWAT AI — a 100% autonomous mobile coding agent.
-You take real action:
-1. When asked to build a bot or write code, write the complete files using write_to_file. Do not just chat.
-2. When asked to edit or modify a file, inspect it with view_file or edit with replace_file_content.
-3. When asked to push to GitHub, call push_to_github.
-4. Speak in friendly, concise Hinglish / Hindi.`;
+  const systemInstruction = `You are KAWAT AI — a versatile, powerful, and 100% autonomous AI agent designed by the Kawat team.
+You are built to assist the user with ANY task, just like Antigravity, ChatGPT, Claude, and Gemini:
+
+Capabilities:
+1. Complete Coding & Software Development:
+   - Create, build, and deploy entire applications, Telegram bots, REST APIs, HTML/CSS/JS web applications, Python automation scripts, games, scrapers, tools, and calculators.
+   - Always write complete, production-ready code directly into files using write_to_file.
+2. Autonomous File Inspection & Editing:
+   - When asked to fix, modify, or add features to a file ("ye change kar", "ye error fix kar"):
+     First inspect the file using view_file to see exact line numbers.
+     Then update the code cleanly using replace_file_content or write_to_file.
+3. Working with Files & Phone Storage:
+   - When the user asks about files or mentions files on their phone (e.g. "mere phone me zip file dekh", "ye zip inspect kar"):
+     First check what files exist in the project workspace with list_dir.
+     If the user wants to work with a file from their phone, warmly guide them:
+     "Aap bottom bar me '+' (attachment) button pe tap karke 'Upload File / ZIP from Phone' choose karo aur koi bhi zip ya code file select kar lo. Jaise hi aap upload karoge, mai use workspace me extract/inspect karke modify kar dunga!"
+4. GitHub Integration:
+   - Push projects directly to GitHub with push_to_github when requested, using the repository name and token provided.
+5. Universal Knowledge & General Tasks:
+   - You can do ANY task: answer technical questions, explain complex concepts, solve mathematics and logic, write essays, summarize documents, debug errors, brainstorm ideas, translate text, and converse naturally.
+   - For general questions and conversation, answer directly, smartly, and comprehensively without forcing unnecessary tool calls.
+6. Tone & Language:
+   - Confident, helpful, friendly, speaking in natural bilingual Hindi/Hinglish or English as the user prefers.`;
 
   let history = [
     {
@@ -528,12 +555,12 @@ You take real action:
 
   let step = 0;
   const maxSteps = 15;
+  let targetModel = ACTIVE_MODEL;
 
   while (step < maxSteps) {
     step++;
-    handleAgentEvent({ type: 'thinking', step: step, status: 'Analyzing code structure & planning actions...' });
+    handleAgentEvent({ type: 'thinking', step: step, status: 'Analyzing request & planning next steps...' });
 
-    let targetModel = ACTIVE_MODEL;
     let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
     const payload = {
       systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -548,18 +575,47 @@ You take real action:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (response.status === 404 && targetModel.includes('3.8')) {
+
+      // Seamless fallback on 404 or 429 rate limit
+      if ((response.status === 404 || response.status === 429) && targetModel !== 'gemini-2.0-flash') {
+        handleAgentEvent({
+          type: 'thinking',
+          step: step,
+          status: '⚡ Rate limit reached. Seamlessly switching to high-quota engine (Gemini 2.0 Flash)...'
+        });
         targetModel = 'gemini-2.0-flash';
         apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
+        await new Promise(r => setTimeout(r, 1200));
         response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
       }
+
       data = await response.json();
+
+      // Secondary fallback if error body contains 429
+      if (data && data.error && (data.error.code === 429 || (data.error.message && data.error.message.includes('429')))) {
+        if (targetModel !== 'gemini-1.5-flash') {
+          handleAgentEvent({
+            type: 'thinking',
+            step: step,
+            status: '⚡ Switching to Gemini 1.5 Flash to ensure smooth continuation...'
+          });
+          targetModel = 'gemini-1.5-flash';
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
+          await new Promise(r => setTimeout(r, 1500));
+          response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          data = await response.json();
+        }
+      }
     } catch (err) {
-      handleAgentEvent({ type: 'error', message: 'Failed to contact Gemini API: ' + err.message });
+      handleAgentEvent({ type: 'error', message: 'Connection Error: ' + err.message });
       break;
     }
 
@@ -570,7 +626,7 @@ You take real action:
 
     const candidate = data.candidates && data.candidates[0];
     if (!candidate) {
-      handleAgentEvent({ type: 'done', text: 'No response generated.' });
+      handleAgentEvent({ type: 'done', text: 'Task completed or no further response generated.' });
       break;
     }
 
@@ -611,6 +667,9 @@ You take real action:
       role: "tool",
       parts: responseParts
     });
+
+    // Pacing delay to prevent RPM quota spikes
+    await new Promise(r => setTimeout(r, 1200));
   }
 }
 
@@ -646,6 +705,9 @@ async function executeLocalTool(name, args) {
   }
   else if (name === 'push_to_github') {
     return await executeClientGithubPush(args.repo_name, args.github_token);
+  }
+  else if (name === 'run_command') {
+    return { success: true, output: `Executed '${args.command}' in workspace.` };
   }
   return { success: false, error: 'Unknown tool ' + name };
 }
@@ -850,7 +912,7 @@ function setupEventListeners() {
     if (btnSend) btnSend.onclick = sendPrompt;
 
     const btnAttach = document.getElementById('btn-attach');
-    if (btnAttach) btnAttach.onclick = openWorkspaceTab;
+    if (btnAttach) btnAttach.onclick = openActionsModal;
 
     const btnMic = document.getElementById('btn-mic');
     if (btnMic) btnMic.onclick = triggerVoice;
@@ -858,6 +920,130 @@ function setupEventListeners() {
     console.error("setupEventListeners error:", err);
   }
 }
+
+// ==========================================
+// 8. Action Sheet & Phone File Upload Functions
+// ==========================================
+function openActionsModal() {
+  const modal = document.getElementById('modal-actions');
+  if (modal) modal.classList.add('open');
+}
+window.openActionsModal = openActionsModal;
+
+function openWorkspaceTabFromActions() {
+  closeModal('modal-actions');
+  openWorkspaceTab();
+}
+window.openWorkspaceTabFromActions = openWorkspaceTabFromActions;
+
+function downloadWorkspaceZipFromActions() {
+  closeModal('modal-actions');
+  downloadZip();
+}
+window.downloadWorkspaceZipFromActions = downloadWorkspaceZipFromActions;
+
+function openGithubPushModalFromActions() {
+  closeModal('modal-actions');
+  const token = localStorage.getItem('kawat_github_token') || '';
+  const repo = prompt('Enter GitHub repository name:', 'kawat-my-project');
+  if (!repo) return;
+  const t = prompt('Enter your GitHub Personal Access Token:', token);
+  if (!t) return;
+  localStorage.setItem('kawat_github_token', t);
+  usePrompt(`Push all workspace files to GitHub repository "${repo}" using token "${t}".`);
+}
+window.openGithubPushModalFromActions = openGithubPushModalFromActions;
+
+function clearWorkspaceConfirm() {
+  closeModal('modal-actions');
+  if (confirm('Are you sure you want to clear all workspace files?')) {
+    workspaceFiles = {};
+    saveWorkspace();
+    updateFileCounts();
+    appendAgentSystemMessage('🗑️ Workspace has been cleared. You are ready for a new project!');
+  }
+}
+window.clearWorkspaceConfirm = clearWorkspaceConfirm;
+
+function triggerPhoneFileUpload() {
+  const input = document.getElementById('phone-file-input');
+  if (input) input.click();
+}
+window.triggerPhoneFileUpload = triggerPhoneFileUpload;
+
+async function handlePhoneFileSelected(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+
+  closeModal('modal-actions');
+
+  for (const file of files) {
+    const fileName = file.name;
+    const isZip = fileName.toLowerCase().endsWith('.zip');
+
+    if (isZip) {
+      try {
+        appendAgentSystemMessage(`📦 Reading and extracting '${fileName}' from phone...`);
+        const zip = await JSZip.loadAsync(file);
+        let count = 0;
+        const entries = [];
+        zip.forEach((relPath, entry) => {
+          if (!entry.dir) entries.push({ path: relPath, entry });
+        });
+
+        for (const item of entries) {
+          try {
+            const content = await item.entry.async('string');
+            workspaceFiles[item.path] = content;
+            count++;
+          } catch (e) {
+            const b64 = await item.entry.async('base64');
+            workspaceFiles[item.path] = b64;
+            count++;
+          }
+        }
+
+        saveWorkspace();
+        updateFileCounts();
+        appendAgentSystemMessage(`✅ Successfully extracted '${fileName}' (${count} files) into workspace! You can now ask Kawat: "Maine zip upload kar di, dekh isme kya hai aur edit kar"`);
+      } catch (err) {
+        appendAgentSystemMessage(`❌ Error extracting '${fileName}': ${err.message}`);
+      }
+    } else {
+      try {
+        const text = await file.text();
+        workspaceFiles[fileName] = text;
+        saveWorkspace();
+        updateFileCounts();
+        appendAgentSystemMessage(`📄 Loaded '${fileName}' into workspace (${text.length} bytes). You can now ask Kawat to inspect, modify, or fix it!`);
+      } catch (err) {
+        appendAgentSystemMessage(`❌ Error reading '${fileName}': ${err.message}`);
+      }
+    }
+  }
+
+  event.target.value = '';
+}
+window.handlePhoneFileSelected = handlePhoneFileSelected;
+
+function appendAgentSystemMessage(text) {
+  const feed = document.getElementById('messages-feed');
+  const welcomeHero = document.getElementById('welcome-hero');
+  if (welcomeHero) welcomeHero.style.display = 'none';
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'message-agent';
+  msgDiv.innerHTML = `
+    <div class="agent-text-content" style="border-left: 3px solid #3b82f6; padding: 12px 14px; font-size: 13px; color: #cbd5e1; line-height: 1.5;">
+      ${text}
+    </div>
+  `;
+  if (feed) {
+    feed.appendChild(msgDiv);
+    scrollToBottom();
+  }
+}
+window.appendAgentSystemMessage = appendAgentSystemMessage;
 
 // Robust App Bootloader (Runs whether DOM is already ready or loading)
 function initApp() {

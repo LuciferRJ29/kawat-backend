@@ -10,22 +10,31 @@ from tools import GEMINI_TOOLS_DECLARATION, TOOL_EXECUTORS
 
 logger = logging.getLogger("kawat_agent")
 
-SYSTEM_INSTRUCTION = """You are KAWAT AI — a 100% autonomous AI coding agent designed to run from a mobile phone interface.
-You do NOT just chat or provide advice; you take action. You have hands and tools.
+SYSTEM_INSTRUCTION = """You are KAWAT AI — a versatile, powerful, and 100% autonomous AI agent designed by the Kawat team.
+You are built to assist the user with ANY task, just like Antigravity, ChatGPT, Claude, and Gemini:
 
-Core Principles:
-1. Always Use Tools:
-   - When asked to create or build a bot/app, write the code directly into files using `write_to_file`.
-   - When asked to modify or fix a file ("file me ye change kar"), first inspect the lines using `view_file`, then modify it using `replace_file_content` or `write_to_file`.
-   - When asked to push to GitHub, collect/use the token and call `push_to_github`.
-   - When asked to test or run code, execute it with `run_command`.
-2. Communication Style:
-   - Friendly, confident, bilingual (Hinglish/Hindi/English) as preferred by user.
-   - Concise summary after performing actions. Do not dump large walls of code in plain text when you have already created the file. Give clickable or clean file references.
-3. Autonomous Problem Solving:
-   - If a command fails or a file edit fails, do NOT stop immediately. Read the error output, inspect the file, correct the syntax or parameters, and retry.
-4. Telegram Bot Building:
-   - When building a Telegram bot, create clean modular code (main bot runner, handlers, requirements.txt, .env.example, README.md).
+Capabilities:
+1. Complete Coding & Software Development:
+   - Create, build, and deploy entire applications, Telegram bots, REST APIs, HTML/CSS/JS web applications, Python automation scripts, games, scrapers, tools, and calculators.
+   - Always write complete, production-ready code directly into files using `write_to_file`. Never leave placeholders like `// TODO` or `...`.
+2. Autonomous File Inspection & Editing:
+   - When asked to fix, modify, or add features to a file ("ye change kar", "ye error fix kar"):
+     First inspect the file using `view_file` to see exact line numbers.
+     Then update the code cleanly using `replace_file_content` or `write_to_file`.
+3. Working with Files & Phone Storage:
+   - When the user asks about files or mentions files on their phone (e.g. "mere phone me zip file dekh", "ye zip inspect kar"):
+     First check what files exist in the project workspace with `list_dir`.
+     If the user wants to work with a file from their phone, warmly guide them:
+     "Aap bottom bar me '+' (attachment) button pe tap karke apne phone storage se koi bhi zip file, python file ya code upload kar sakte ho! Jaise hi aap upload karoge, mai use turant workspace me extract/inspect karke modify kar dunga."
+4. GitHub Integration:
+   - Push projects directly to GitHub with `push_to_github` when requested, using the repository name and token provided.
+5. Terminal & Code Execution:
+   - Run tests, scripts, or package installations using `run_command` in the workspace.
+6. Universal Knowledge & General Tasks:
+   - You can do ANY task: answer technical questions, explain complex concepts, solve mathematics and logic, write essays, summarize documents, debug errors, brainstorm ideas, translate text, and converse naturally.
+   - For general questions and conversation, answer directly, smartly, and comprehensively without forcing unnecessary tool calls.
+7. Tone & Language:
+   - Confident, helpful, friendly, speaking in natural bilingual Hindi/Hinglish or English as the user prefers.
 """
 
 class KawatAgent:
@@ -67,24 +76,23 @@ class KawatAgent:
             return "Missing API Key"
 
         tools = self._convert_schema_to_gemini(GEMINI_TOOLS_DECLARATION)
+        current_model_name = self.model_name
+
+        def _create_model(m_name: str):
+            return genai.GenerativeModel(
+                model_name=m_name,
+                system_instruction=SYSTEM_INSTRUCTION,
+                tools=tools
+            )
 
         try:
-            model = genai.GenerativeModel(
-                model_name=self.model_name,
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=tools
-            )
+            model = _create_model(current_model_name)
             chat = model.start_chat(enable_automatic_function_calling=False)
-        except Exception as e:
-            # Fallback to standard 1.5 flash if model name not recognized
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=tools
-            )
+        except Exception:
+            current_model_name = "gemini-2.0-flash"
+            model = _create_model(current_model_name)
             chat = model.start_chat(enable_automatic_function_calling=False)
 
-        # Reconstruct past context if any
         current_prompt = user_prompt
         step = 0
         final_text = ""
@@ -94,15 +102,37 @@ class KawatAgent:
             await event_callback({
                 "type": "thinking",
                 "step": step,
-                "status": "Analyzing and planning next action..."
+                "status": "Analyzing request & planning next steps..."
             })
 
             try:
                 response = await asyncio.to_thread(chat.send_message, current_prompt)
             except Exception as e:
-                err_msg = f"LLM Generation Error: {str(e)}"
-                await event_callback({"type": "error", "message": err_msg})
-                return err_msg
+                err_str = str(e)
+                # Catch 429 quota exhaustion or rate limits
+                if "429" in err_str or "ResourceExhausted" in err_str or "quota" in err_str.lower():
+                    fallback_model = "gemini-2.0-flash" if "2.0" not in current_model_name else "gemini-1.5-flash"
+                    await event_callback({
+                        "type": "thinking",
+                        "step": step,
+                        "status": f"⚡ Rate limit reached. Seamlessly switching to high-quota engine ({fallback_model})..."
+                    })
+                    try:
+                        current_model_name = fallback_model
+                        model = _create_model(current_model_name)
+                        # Re-start chat with previous history if available
+                        history = chat.history if hasattr(chat, 'history') else None
+                        chat = model.start_chat(history=history, enable_automatic_function_calling=False)
+                        await asyncio.sleep(1.5)
+                        response = await asyncio.to_thread(chat.send_message, current_prompt)
+                    except Exception as retry_err:
+                        err_msg = f"LLM Generation Error: {str(retry_err)}"
+                        await event_callback({"type": "error", "message": err_msg})
+                        return err_msg
+                else:
+                    err_msg = f"LLM Generation Error: {err_str}"
+                    await event_callback({"type": "error", "message": err_msg})
+                    return err_msg
 
             # Check if model emitted text
             part_text = ""
@@ -115,11 +145,12 @@ class KawatAgent:
             has_func_calls = False
             func_calls = []
 
-            for candidate in response.candidates:
-                for part in candidate.content.parts:
-                    if hasattr(part, "function_call") and part.function_call:
-                        has_func_calls = True
-                        func_calls.append(part.function_call)
+            for candidate in (response.candidates or []):
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "function_call") and part.function_call:
+                            has_func_calls = True
+                            func_calls.append(part.function_call)
 
             if not has_func_calls:
                 final_text = part_text
@@ -163,6 +194,8 @@ class KawatAgent:
                     }
                 })
 
+            # Small delay between tool steps to stay well below RPM limits
+            await asyncio.sleep(1.2)
             current_prompt = tool_responses
 
         if step >= MAX_AGENT_STEPS and not final_text:

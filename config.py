@@ -15,8 +15,8 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 # Default Gemini API Key (can be injected via Heroku config vars or per-request from mobile)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# Default Model: gemini-3.8-flash (High)
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-3.8-flash")
+# Default Model: gemini-2.0-flash (High quota, lightning fast)
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-2.0-flash")
 
 # Default Telegram Bot Token (optional)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
