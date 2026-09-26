@@ -3,8 +3,15 @@
 // State & Config
 let VERCEL_GATEWAY = localStorage.getItem('kawat_gateway') || 'https://kawatai.vercel.app';
 let ACTIVE_BACKEND = localStorage.getItem('kawat_backend_url') || '';
-let GEMINI_API_KEY = localStorage.getItem('kawat_gemini_key') || '';
-let ACTIVE_MODEL = localStorage.getItem('kawat_model') || 'gemini-2.0-flash';
+let ACTIVE_MODEL = localStorage.getItem('kawat_model') || 'gemini-3.8-flash';
+
+function getModelDisplayName(model) {
+  if (!model) return 'Kawat 1';
+  if (model.includes('3.8') || model.includes('kawat-1')) return 'Kawat 1';
+  if (model.includes('2.0')) return 'Kawat 1 Lite';
+  if (model.includes('1.5-pro')) return 'Kawat Pro';
+  return 'Kawat 1';
+}
 
 // Virtual Workspace (Files saved locally on phone)
 let workspaceFiles = {};
@@ -83,7 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function updateUIFromState() {
-  activeModelName.textContent = ACTIVE_MODEL;
+  activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
   document.getElementById('model-select-dropdown').value = ACTIVE_MODEL;
   document.getElementById('api-key-input').value = GEMINI_API_KEY;
   document.getElementById('backend-input').value = ACTIVE_BACKEND;
@@ -299,7 +306,8 @@ You take real action:
     step++;
     handleAgentEvent({ type: 'thinking', step: step, status: 'Analyzing code structure & planning actions...' });
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${ACTIVE_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    let targetModel = ACTIVE_MODEL;
+    let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
     const payload = {
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents: history,
@@ -308,11 +316,21 @@ You take real action:
 
     let data;
     try {
-      const response = await fetch(apiUrl, {
+      let response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      // Fallback if 3.8 is not available on standard public API endpoint
+      if (response.status === 404 && targetModel.includes('3.8')) {
+        targetModel = 'gemini-2.0-flash';
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
       data = await response.json();
     } catch (err) {
       handleAgentEvent({ type: 'error', message: 'Failed to contact Gemini API: ' + err.message });
@@ -658,7 +676,7 @@ async function saveSettings() {
   localStorage.setItem('kawat_gateway', VERCEL_GATEWAY);
   localStorage.setItem('kawat_model', ACTIVE_MODEL);
 
-  activeModelName.textContent = ACTIVE_MODEL;
+  activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
   closeModal('modal-backend');
 
   evaluateEngineStatus();
