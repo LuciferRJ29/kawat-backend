@@ -29,7 +29,7 @@
 
     <!-- Top App Bar (Sleek ChatGPT & Gemini Fusion) -->
     <header class="app-header">
-      <button class="icon-btn-header" id="btn-open-drawer" aria-label="Open Drawer">
+      <button class="icon-btn-header" id="btn-open-drawer" onclick="toggleDrawer(true)" aria-label="Open Drawer">
         <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.2" fill="none">
           <line x1="4" y1="7" x2="20" y2="7"></line>
           <line x1="4" y1="12" x2="16" y2="12"></line>
@@ -38,7 +38,7 @@
       </button>
 
       <!-- Center Unified Model & Status Pill -->
-      <div class="model-badge-btn" id="btn-model-select">
+      <div class="model-badge-btn" id="btn-model-select" onclick="openBackendModal()">
         <span class="status-indicator-dot" id="header-status-dot"></span>
         <span class="model-name" id="active-model-name">Kawat 1</span>
         <svg class="chevron-down" viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2.5" fill="none">
@@ -46,7 +46,7 @@
         </svg>
       </div>
 
-      <button class="icon-btn-header" id="btn-new-chat" aria-label="New Session" title="New Session">
+      <button class="icon-btn-header" id="btn-new-chat" onclick="startNewSession()" aria-label="New Session" title="New Session">
         <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none">
           <path d="M12 20h9"></path>
           <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
@@ -55,14 +55,14 @@
     </header>
 
     <!-- Side Navigation Drawer -->
-    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer(false)"></div>
     <aside class="side-drawer" id="side-drawer">
       <div class="drawer-header">
         <div class="drawer-brand">
           <div class="logo-box">⚡</div>
           <span class="brand-text">KAWAT AGENT</span>
         </div>
-        <button class="icon-btn-close" id="btn-close-drawer">
+        <button class="icon-btn-close" id="btn-close-drawer" onclick="toggleDrawer(false)">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -188,7 +188,7 @@
     <div class="bottom-bar-wrapper">
       <div class="bottom-pill-container">
         
-        <button class="pill-btn-action" id="btn-attach" title="Attach Tool or File">
+        <button class="pill-btn-action" id="btn-attach" onclick="openWorkspaceTab()" title="Attach Tool or File">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.4" fill="none">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -203,7 +203,7 @@
           autocomplete="off"
         ></textarea>
 
-        <button class="pill-btn-action" id="btn-mic" title="Voice Input">
+        <button class="pill-btn-action" id="btn-mic" onclick="triggerVoice()" title="Voice Input">
           <svg viewBox="0 0 24 24" width="19" height="19" stroke="currentColor" stroke-width="2" fill="none">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
@@ -212,7 +212,7 @@
           </svg>
         </button>
 
-        <button class="pill-btn-send" id="btn-send" title="Send Request">
+        <button class="pill-btn-send" id="btn-send" onclick="sendPrompt()" title="Send Request">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
           </svg>

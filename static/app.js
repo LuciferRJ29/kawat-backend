@@ -1,8 +1,10 @@
 // KAWAT Mobile Agent Core Script — Hybrid Real Autonomous Engine
+// Fully Guarded & Zero-Failure Architecture
 
-// State & Config
+// Global State & Config
 let VERCEL_GATEWAY = localStorage.getItem('kawat_gateway') || 'https://kawatai.vercel.app';
 let ACTIVE_BACKEND = localStorage.getItem('kawat_backend_url') || '';
+let GEMINI_API_KEY = localStorage.getItem('kawat_gemini_key') || '';
 let ACTIVE_MODEL = localStorage.getItem('kawat_model') || 'gemini-3.8-flash';
 
 function getModelDisplayName(model) {
@@ -13,7 +15,7 @@ function getModelDisplayName(model) {
   return 'Kawat 1';
 }
 
-// Virtual Workspace (Files saved locally on phone)
+// Virtual Workspace (Persistent on Phone)
 let workspaceFiles = {};
 try {
   workspaceFiles = JSON.parse(localStorage.getItem('kawat_workspace_files') || '{}');
@@ -25,41 +27,25 @@ let ws = null;
 let currentAgentTurn = null;
 let currentToolCard = null;
 let isHerokuConnected = false;
+let speechRecognizer = null;
 
-// Configure Markdown
-marked.setOptions({
-  breaks: true,
-  gfm: true
-});
-
-// DOM Elements
-const drawer = document.getElementById('side-drawer');
-const drawerOverlay = document.getElementById('drawer-overlay');
-const promptInput = document.getElementById('prompt-input');
-const btnSend = document.getElementById('btn-send');
-const messagesFeed = document.getElementById('messages-feed');
-const welcomeHero = document.getElementById('welcome-hero');
-const headerStatusDot = document.getElementById('header-status-dot');
-const activeModelName = document.getElementById('active-model-name');
-const drawerEngineTitle = document.getElementById('drawer-engine-title');
-const drawerBackendTarget = document.getElementById('drawer-backend-target');
-const drawerFileCount = document.getElementById('drawer-file-count');
-const setupAlertBanner = document.getElementById('setup-alert-banner');
+// Markdown Support
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+}
 
 // ==========================================
 // 1. Android Hardware Back Button Handler
 // ==========================================
 window.handleAndroidBack = function() {
-  // If drawer is open, close it
+  const drawer = document.getElementById('side-drawer');
   if (drawer && drawer.classList.contains('open')) {
     toggleDrawer(false);
     return true;
   }
 
-  // If any modal is open, close it
   const openModal = document.querySelector('.modal-backdrop.open');
   if (openModal) {
-    // If file preview inside modal is open, close preview first
     const filePreview = document.getElementById('file-preview-box');
     if (filePreview && filePreview.style.display === 'block') {
       closeFilePreview();
@@ -69,63 +55,310 @@ window.handleAndroidBack = function() {
     return true;
   }
 
-  // Not handled -> allows native double-tap back to exit
   return false;
 };
 
 // ==========================================
-// 2. Initialize App
+// 2. Global Actions (Exposed to window)
 // ==========================================
-document.addEventListener('DOMContentLoaded', async () => {
-  setupEventListeners();
-  updateUIFromState();
-  updateFileCounts();
+function toggleDrawer(open) {
+  const drawer = document.getElementById('side-drawer');
+  const drawerOverlay = document.getElementById('drawer-overlay');
+  if (drawer) drawer.classList.toggle('open', open);
+  if (drawerOverlay) drawerOverlay.classList.toggle('open', open);
+}
 
-  // Try connecting to Heroku / Vercel if configured
-  if (ACTIVE_BACKEND || VERCEL_GATEWAY) {
-    await resolveBackendAndConnect();
-  } else {
-    evaluateEngineStatus();
+function openBackendModal() {
+  toggleDrawer(false);
+  const apiKeyInp = document.getElementById('api-key-input');
+  const backendInp = document.getElementById('backend-input');
+  const gatewayInp = document.getElementById('gateway-input');
+  const modelDropdown = document.getElementById('model-select-dropdown');
+  const modal = document.getElementById('modal-backend');
+
+  if (apiKeyInp) apiKeyInp.value = GEMINI_API_KEY;
+  if (backendInp) backendInp.value = ACTIVE_BACKEND;
+  if (gatewayInp) gatewayInp.value = VERCEL_GATEWAY;
+  if (modelDropdown) modelDropdown.value = ACTIVE_MODEL;
+  if (modal) modal.classList.add('open');
+}
+
+function closeModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.remove('open');
+}
+
+function startNewSession() {
+  toggleDrawer(false);
+  const messagesFeed = document.getElementById('messages-feed');
+  const welcomeHero = document.getElementById('welcome-hero');
+  if (messagesFeed) messagesFeed.innerHTML = '';
+  if (welcomeHero) welcomeHero.style.display = 'flex';
+}
+
+function usePrompt(text) {
+  toggleDrawer(false);
+  const promptInput = document.getElementById('prompt-input');
+  if (promptInput) {
+    promptInput.value = text;
+    promptInput.focus();
   }
-});
+  sendPrompt();
+}
 
+async function saveSettings() {
+  const apiKeyInp = document.getElementById('api-key-input');
+  const backendInp = document.getElementById('backend-input');
+  const gatewayInp = document.getElementById('gateway-input');
+  const modelDropdown = document.getElementById('model-select-dropdown');
+  const activeModelName = document.getElementById('active-model-name');
+
+  if (apiKeyInp) GEMINI_API_KEY = apiKeyInp.value.trim();
+  if (backendInp) ACTIVE_BACKEND = backendInp.value.trim();
+  if (gatewayInp) VERCEL_GATEWAY = gatewayInp.value.trim();
+  if (modelDropdown) ACTIVE_MODEL = modelDropdown.value;
+
+  localStorage.setItem('kawat_gemini_key', GEMINI_API_KEY);
+  localStorage.setItem('kawat_backend_url', ACTIVE_BACKEND);
+  localStorage.setItem('kawat_gateway', VERCEL_GATEWAY);
+  localStorage.setItem('kawat_model', ACTIVE_MODEL);
+
+  if (activeModelName) activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
+  closeModal('modal-backend');
+
+  evaluateEngineStatus();
+  if (ACTIVE_BACKEND) {
+    connectWebSocket();
+  }
+}
+
+async function checkConnection() {
+  const resBox = document.getElementById('conn-result');
+  const testBackend = document.getElementById('backend-input') ? document.getElementById('backend-input').value.trim() : '';
+  const testKey = document.getElementById('api-key-input') ? document.getElementById('api-key-input').value.trim() : '';
+
+  if (!resBox) return;
+  resBox.textContent = 'Testing connection...';
+  resBox.style.color = '#f59e0b';
+
+  let messages = [];
+
+  if (testKey) {
+    try {
+      const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${testKey}`);
+      if (gemRes.ok) messages.push('✓ Gemini API Key Valid!');
+      else messages.push('✗ Invalid Gemini API Key');
+    } catch (e) {
+      messages.push('✗ Gemini Key check error');
+    }
+  }
+
+  if (testBackend) {
+    try {
+      const res = await fetch(`${testBackend.replace(/\/$/, '')}/api/status`);
+      if (res.ok) messages.push('✓ Heroku Backend Online!');
+      else messages.push(`✗ Heroku returned ${res.status}`);
+    } catch (e) {
+      messages.push('✗ Heroku Unreachable');
+    }
+  }
+
+  if (messages.length === 0) {
+    resBox.textContent = 'Please enter a Gemini API Key or Heroku URL first.';
+    resBox.style.color = '#f59e0b';
+  } else {
+    resBox.innerHTML = messages.join('<br>');
+    resBox.style.color = messages.some(m => m.includes('✓')) ? '#10b981' : '#ef4444';
+  }
+}
+
+// Workspace Modal
+function openWorkspaceTab() {
+  toggleDrawer(false);
+  const modal = document.getElementById('modal-workspace');
+  if (modal) modal.classList.add('open');
+  const treeBox = document.getElementById('workspace-file-tree');
+  if (!treeBox) return;
+  treeBox.innerHTML = '';
+
+  const fileNames = Object.keys(workspaceFiles);
+  if (fileNames.length === 0) {
+    treeBox.innerHTML = '<div style="color:#94a3b8; padding:8px;">Workspace is empty. Ask Kawat to build something!</div>';
+    return;
+  }
+
+  fileNames.sort().forEach(path => {
+    const el = document.createElement('div');
+    el.className = 'file-tree-item';
+    el.innerHTML = `<span>📄</span> <span>${path}</span> <span style="margin-left:auto; font-size:11px; color:#64748b;">${workspaceFiles[path].length}B</span>`;
+    el.onclick = () => previewFile(path);
+    treeBox.appendChild(el);
+  });
+}
+
+function previewFile(path) {
+  const content = workspaceFiles[path];
+  if (content === undefined) return;
+  const filenameEl = document.getElementById('preview-filename');
+  const codeEl = document.getElementById('preview-code');
+  const previewBox = document.getElementById('file-preview-box');
+
+  if (filenameEl) filenameEl.textContent = path;
+  if (codeEl) {
+    codeEl.textContent = content;
+    if (typeof Prism !== 'undefined') Prism.highlightElement(codeEl);
+  }
+  if (previewBox) previewBox.style.display = 'block';
+}
+
+function closeFilePreview() {
+  const previewBox = document.getElementById('file-preview-box');
+  if (previewBox) previewBox.style.display = 'none';
+}
+
+function clearWorkspaceFiles() {
+  if (confirm('Clear all workspace files?')) {
+    workspaceFiles = {};
+    saveWorkspace();
+    updateFileCounts();
+    openWorkspaceTab();
+  }
+}
+
+async function downloadZip() {
+  const fileNames = Object.keys(workspaceFiles);
+  if (fileNames.length === 0) {
+    alert('No files in workspace to download!');
+    return;
+  }
+
+  if (typeof JSZip === 'undefined') {
+    alert('ZIP utility loading, please try again in a second.');
+    return;
+  }
+
+  try {
+    const zip = new JSZip();
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      zip.file(path, content);
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'kawat_project.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Failed to generate ZIP: ' + err.message);
+  }
+}
+
+function triggerVoice() {
+  const micBtn = document.getElementById('btn-mic');
+  const promptInput = document.getElementById('prompt-input');
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (SpeechRecognition) {
+    if (!speechRecognizer) {
+      speechRecognizer = new SpeechRecognition();
+      speechRecognizer.continuous = false;
+      speechRecognizer.interimResults = false;
+      speechRecognizer.lang = 'hi-IN';
+
+      speechRecognizer.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        if (promptInput) {
+          promptInput.value = (promptInput.value + ' ' + transcript).trim();
+        }
+        if (micBtn) micBtn.style.color = '';
+      };
+      speechRecognizer.onerror = () => { if (micBtn) micBtn.style.color = ''; };
+      speechRecognizer.onend = () => { if (micBtn) micBtn.style.color = ''; };
+    }
+    if (micBtn) micBtn.style.color = '#ef4444';
+    speechRecognizer.start();
+  } else {
+    alert('Voice recognition not supported on this browser/device.');
+  }
+}
+
+// ATTACH TO WINDOW EXPLICITLY (Zero missing function errors!)
+window.toggleDrawer = toggleDrawer;
+window.openBackendModal = openBackendModal;
+window.closeModal = closeModal;
+window.startNewSession = startNewSession;
+window.usePrompt = usePrompt;
+window.saveSettings = saveSettings;
+window.checkConnection = checkConnection;
+window.openWorkspaceTab = openWorkspaceTab;
+window.closeFilePreview = closeFilePreview;
+window.clearWorkspaceFiles = clearWorkspaceFiles;
+window.downloadZip = downloadZip;
+window.triggerVoice = triggerVoice;
+
+// ==========================================
+// 3. UI State & Engine Evaluation
+// ==========================================
 function updateUIFromState() {
-  activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
-  document.getElementById('model-select-dropdown').value = ACTIVE_MODEL;
-  document.getElementById('api-key-input').value = GEMINI_API_KEY;
-  document.getElementById('backend-input').value = ACTIVE_BACKEND;
-  document.getElementById('gateway-input').value = VERCEL_GATEWAY;
+  const activeModelName = document.getElementById('active-model-name');
+  const modelDropdown = document.getElementById('model-select-dropdown');
+  const apiKeyInp = document.getElementById('api-key-input');
+  const backendInp = document.getElementById('backend-input');
+  const gatewayInp = document.getElementById('gateway-input');
+
+  if (activeModelName) activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
+  if (modelDropdown) modelDropdown.value = ACTIVE_MODEL;
+  if (apiKeyInp) apiKeyInp.value = GEMINI_API_KEY;
+  if (backendInp) backendInp.value = ACTIVE_BACKEND;
+  if (gatewayInp) gatewayInp.value = VERCEL_GATEWAY;
 }
 
 function evaluateEngineStatus() {
+  const headerStatusDot = document.getElementById('header-status-dot');
+  const drawerEngineTitle = document.getElementById('drawer-engine-title');
+  const drawerBackendTarget = document.getElementById('drawer-backend-target');
+  const setupAlertBanner = document.getElementById('setup-alert-banner');
+
   if (isHerokuConnected) {
-    headerStatusDot.className = 'status-indicator-dot';
-    headerStatusDot.title = 'Heroku Connected';
-    drawerEngineTitle.textContent = '⚡ Heroku Backend Live';
-    drawerBackendTarget.textContent = ACTIVE_BACKEND;
+    if (headerStatusDot) { headerStatusDot.className = 'status-indicator-dot'; headerStatusDot.title = 'Heroku Connected'; }
+    if (drawerEngineTitle) drawerEngineTitle.textContent = '⚡ Heroku Backend Live';
+    if (drawerBackendTarget) drawerBackendTarget.textContent = ACTIVE_BACKEND;
     if (setupAlertBanner) setupAlertBanner.style.display = 'none';
   } else if (GEMINI_API_KEY) {
-    headerStatusDot.className = 'status-indicator-dot direct';
-    headerStatusDot.title = 'Direct AI Active';
-    drawerEngineTitle.textContent = '⚡ Direct Gemini Client AI';
-    drawerBackendTarget.textContent = 'Autonomous Phone Engine (Ready)';
+    if (headerStatusDot) { headerStatusDot.className = 'status-indicator-dot direct'; headerStatusDot.title = 'Direct AI Active'; }
+    if (drawerEngineTitle) drawerEngineTitle.textContent = '⚡ Direct Gemini Client AI';
+    if (drawerBackendTarget) drawerBackendTarget.textContent = 'Autonomous Phone Engine (Ready)';
     if (setupAlertBanner) setupAlertBanner.style.display = 'none';
   } else {
-    headerStatusDot.className = 'status-indicator-dot checking';
-    headerStatusDot.title = 'Setup Required';
-    drawerEngineTitle.textContent = '⚠️ Setup Required';
-    drawerBackendTarget.textContent = 'Enter Gemini Key or Heroku URL';
+    if (headerStatusDot) { headerStatusDot.className = 'status-indicator-dot checking'; headerStatusDot.title = 'Setup Required'; }
+    if (drawerEngineTitle) drawerEngineTitle.textContent = '⚠️ Setup Required';
+    if (drawerBackendTarget) drawerBackendTarget.textContent = 'Enter Gemini Key or Heroku URL';
     if (setupAlertBanner) setupAlertBanner.style.display = 'flex';
   }
 }
 
+function updateFileCounts() {
+  const count = Object.keys(workspaceFiles).length;
+  const drawerFileCount = document.getElementById('drawer-file-count');
+  const modalCount = document.getElementById('modal-file-count');
+  if (drawerFileCount) drawerFileCount.textContent = count;
+  if (modalCount) modalCount.textContent = count;
+}
+
+function saveWorkspace() {
+  localStorage.setItem('kawat_workspace_files', JSON.stringify(workspaceFiles));
+}
+
 // ==========================================
-// 3. Backend Resolution & WebSocket
+// 4. WebSocket & Remote Resolution
 // ==========================================
 async function resolveBackendAndConnect() {
   if (VERCEL_GATEWAY) {
     try {
-      const res = await fetch(`${VERCEL_GATEWAY.replace(/\/$/, '')}/api/config`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${VERCEL_GATEWAY.replace(/\/$/, '')}/api/config`, { signal: AbortSignal.timeout(2500) });
       if (res.ok) {
         const data = await res.json();
         if (data.backend_url) {
@@ -133,9 +366,7 @@ async function resolveBackendAndConnect() {
           localStorage.setItem('kawat_backend_url', ACTIVE_BACKEND);
         }
       }
-    } catch (e) {
-      console.log('Gateway check bypassed');
-    }
+    } catch (e) {}
   }
 
   if (ACTIVE_BACKEND) {
@@ -159,7 +390,6 @@ function connectWebSocket() {
     ws.onopen = () => {
       isHerokuConnected = true;
       evaluateEngineStatus();
-      syncRemoteFiles();
     };
 
     ws.onclose = () => {
@@ -177,7 +407,7 @@ function connectWebSocket() {
         const data = JSON.parse(event.data);
         handleAgentEvent(data);
       } catch (e) {
-        console.error('Failed to parse event:', e);
+        console.error(e);
       }
     };
   } catch (e) {
@@ -187,19 +417,20 @@ function connectWebSocket() {
 }
 
 // ==========================================
-// 4. Send Message / Execute Agent Task
+// 5. Send Prompt & Execution Loop
 // ==========================================
 async function sendPrompt() {
+  const promptInput = document.getElementById('prompt-input');
+  if (!promptInput) return;
   const text = promptInput.value.trim();
   if (!text) return;
 
-  // Check if agent is configured
   if (!isHerokuConnected && !GEMINI_API_KEY) {
     openBackendModal();
     return;
   }
 
-  // Hide welcome hero
+  const welcomeHero = document.getElementById('welcome-hero');
   if (welcomeHero) welcomeHero.style.display = 'none';
 
   appendUserMessage(text);
@@ -209,7 +440,6 @@ async function sendPrompt() {
   currentAgentTurn = createAgentTurnContainer();
   currentToolCard = null;
 
-  // Mode A: If Heroku WebSocket is live, use Heroku
   if (isHerokuConnected && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       prompt: text,
@@ -217,14 +447,11 @@ async function sendPrompt() {
       model: ACTIVE_MODEL
     }));
   } else {
-    // Mode B: Direct Client Autonomous Agent Loop!
     await executeClientAgentTurn(text);
   }
 }
+window.sendPrompt = sendPrompt;
 
-// ==========================================
-// 5. Direct Client Autonomous Agent Engine
-// ==========================================
 const CLIENT_TOOLS = [
   {
     name: "write_to_file",
@@ -321,7 +548,6 @@ You take real action:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      // Fallback if 3.8 is not available on standard public API endpoint
       if (response.status === 404 && targetModel.includes('3.8')) {
         targetModel = 'gemini-2.0-flash';
         apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_API_KEY}`;
@@ -351,17 +577,12 @@ You take real action:
     const content = candidate.content;
     history.push(content);
 
-    // Check for function calls
     const functionCalls = [];
     let textResponse = '';
 
     for (const part of (content.parts || [])) {
-      if (part.functionCall) {
-        functionCalls.push(part.functionCall);
-      }
-      if (part.text) {
-        textResponse += part.text;
-      }
+      if (part.functionCall) functionCalls.push(part.functionCall);
+      if (part.text) textResponse += part.text;
     }
 
     if (functionCalls.length === 0) {
@@ -369,7 +590,6 @@ You take real action:
       break;
     }
 
-    // Execute functions client-side
     const responseParts = [];
     for (const fc of functionCalls) {
       const fnName = fc.name;
@@ -394,7 +614,6 @@ You take real action:
   }
 }
 
-// Local Tool Implementations
 async function executeLocalTool(name, args) {
   if (name === 'write_to_file') {
     const path = args.target_file;
@@ -431,12 +650,10 @@ async function executeLocalTool(name, args) {
   return { success: false, error: 'Unknown tool ' + name };
 }
 
-// Client-side GitHub Pusher (Direct from Phone!)
 async function executeClientGithubPush(repoName, token) {
   if (!token) return { success: false, error: 'GitHub Token is required.' };
   try {
     const cleanToken = token.trim();
-    // 1. Get user
     const userRes = await fetch('https://api.github.com/user', {
       headers: { 'Authorization': `token ${cleanToken}`, 'Accept': 'application/vnd.github.v3+json' }
     });
@@ -444,14 +661,12 @@ async function executeClientGithubPush(repoName, token) {
     const userData = await userRes.json();
     const username = userData.login;
 
-    // 2. Create repo
     await fetch('https://api.github.com/user/repos', {
       method: 'POST',
       headers: { 'Authorization': `token ${cleanToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: repoName, description: 'Created autonomously by KAWAT Agent', private: false })
     });
 
-    // 3. Push files
     let pushed = 0;
     for (const [path, content] of Object.entries(workspaceFiles)) {
       const b64 = btoa(unescape(encodeURIComponent(content)));
@@ -470,20 +685,8 @@ async function executeClientGithubPush(repoName, token) {
   }
 }
 
-// Workspace Persistence
-function saveWorkspace() {
-  localStorage.setItem('kawat_workspace_files', JSON.stringify(workspaceFiles));
-}
-
-function updateFileCounts() {
-  const count = Object.keys(workspaceFiles).length;
-  if (drawerFileCount) drawerFileCount.textContent = count;
-  const modalCount = document.getElementById('modal-file-count');
-  if (modalCount) modalCount.textContent = count;
-}
-
 // ==========================================
-// 6. Live Agent Event Rendering
+// 6. Event Rendering
 // ==========================================
 function handleAgentEvent(event) {
   if (!currentAgentTurn) {
@@ -544,7 +747,7 @@ function handleAgentEvent(event) {
       const badge = document.createElement('span');
       badge.className = 'tool-badge-done';
       badge.textContent = event.result.success !== false ? '✓ Done' : '✗ Failed';
-      header.appendChild(badge);
+      if (header) header.appendChild(badge);
 
       let summary = '';
       if (event.result.message) summary = event.result.message;
@@ -553,7 +756,7 @@ function handleAgentEvent(event) {
       else if (event.result.error) summary = `Error: ${event.result.error}`;
       else summary = JSON.stringify(event.result);
 
-      body.innerHTML = summary;
+      if (body) body.innerHTML = summary;
     }
     updateFileCounts();
   }
@@ -564,9 +767,9 @@ function handleAgentEvent(event) {
     if (event.text) {
       const textDiv = document.createElement('div');
       textDiv.className = 'agent-text-content';
-      textDiv.innerHTML = marked.parse(event.text);
+      textDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(event.text) : event.text;
       currentAgentTurn.appendChild(textDiv);
-      Prism.highlightAllUnder(textDiv);
+      if (typeof Prism !== 'undefined') Prism.highlightAllUnder(textDiv);
     }
   }
   else if (event.type === 'error') {
@@ -577,6 +780,8 @@ function handleAgentEvent(event) {
 }
 
 function appendUserMessage(text) {
+  const messagesFeed = document.getElementById('messages-feed');
+  if (!messagesFeed) return;
   const div = document.createElement('div');
   div.className = 'message-user';
   div.textContent = text;
@@ -585,249 +790,94 @@ function appendUserMessage(text) {
 }
 
 function createAgentTurnContainer() {
+  const messagesFeed = document.getElementById('messages-feed');
   const div = document.createElement('div');
   div.className = 'message-agent';
-  messagesFeed.appendChild(div);
+  if (messagesFeed) messagesFeed.appendChild(div);
   scrollToBottom();
   return div;
 }
 
 function appendSystemNotice(text, type = 'info') {
+  const messagesFeed = document.getElementById('messages-feed');
   const div = document.createElement('div');
   div.className = `tool-card ${type}`;
   div.innerHTML = `<span style="color:#f59e0b;">⚠️ ${text}</span>`;
-  messagesFeed.appendChild(div);
+  if (messagesFeed) messagesFeed.appendChild(div);
   scrollToBottom();
 }
 
 function scrollToBottom() {
   const container = document.getElementById('chat-container');
-  container.scrollTop = container.scrollHeight;
-}
-
-function usePrompt(text) {
-  toggleDrawer(false);
-  promptInput.value = text;
-  promptInput.focus();
-  sendPrompt();
-}
-
-function startNewSession() {
-  toggleDrawer(false);
-  messagesFeed.innerHTML = '';
-  if (welcomeHero) welcomeHero.style.display = 'flex';
+  if (container) container.scrollTop = container.scrollHeight;
 }
 
 // ==========================================
-// 7. Event Listeners & Modals
+// 7. Event Listener Initializer (Self-Healing)
 // ==========================================
 function setupEventListeners() {
-  document.getElementById('btn-open-drawer').onclick = () => toggleDrawer(true);
-  document.getElementById('btn-close-drawer').onclick = () => toggleDrawer(false);
-  drawerOverlay.onclick = () => toggleDrawer(false);
-
-  document.getElementById('btn-new-chat').onclick = startNewSession;
-
-  promptInput.addEventListener('input', () => {
-    promptInput.style.height = 'auto';
-    promptInput.style.height = Math.min(promptInput.scrollHeight, 120) + 'px';
-  });
-
-  promptInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendPrompt();
-    }
-  });
-
-  btnSend.onclick = sendPrompt;
-
-  document.getElementById('btn-model-select').onclick = openBackendModal;
-
-  setupVoiceRecognition();
-}
-
-function toggleDrawer(open) {
-  drawer.classList.toggle('open', open);
-  drawerOverlay.classList.toggle('open', open);
-}
-
-function openBackendModal() {
-  toggleDrawer(false);
-  document.getElementById('api-key-input').value = GEMINI_API_KEY;
-  document.getElementById('backend-input').value = ACTIVE_BACKEND;
-  document.getElementById('gateway-input').value = VERCEL_GATEWAY;
-  document.getElementById('model-select-dropdown').value = ACTIVE_MODEL;
-  document.getElementById('modal-backend').classList.add('open');
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
-}
-
-async function saveSettings() {
-  GEMINI_API_KEY = document.getElementById('api-key-input').value.trim();
-  ACTIVE_BACKEND = document.getElementById('backend-input').value.trim();
-  VERCEL_GATEWAY = document.getElementById('gateway-input').value.trim();
-  ACTIVE_MODEL = document.getElementById('model-select-dropdown').value;
-
-  localStorage.setItem('kawat_gemini_key', GEMINI_API_KEY);
-  localStorage.setItem('kawat_backend_url', ACTIVE_BACKEND);
-  localStorage.setItem('kawat_gateway', VERCEL_GATEWAY);
-  localStorage.setItem('kawat_model', ACTIVE_MODEL);
-
-  activeModelName.textContent = getModelDisplayName(ACTIVE_MODEL);
-  closeModal('modal-backend');
-
-  evaluateEngineStatus();
-  if (ACTIVE_BACKEND) {
-    connectWebSocket();
-  }
-}
-
-async function checkConnection() {
-  const resBox = document.getElementById('conn-result');
-  const testBackend = document.getElementById('backend-input').value.trim();
-  const testKey = document.getElementById('api-key-input').value.trim();
-
-  resBox.textContent = 'Testing connection...';
-  resBox.style.color = '#f59e0b';
-
-  let messages = [];
-
-  // Test Gemini Key
-  if (testKey) {
-    try {
-      const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${testKey}`);
-      if (gemRes.ok) messages.push('✓ Gemini API Key Valid!');
-      else messages.push('✗ Invalid Gemini API Key');
-    } catch (e) {
-      messages.push('✗ Gemini Key check error');
-    }
-  }
-
-  // Test Heroku Backend
-  if (testBackend) {
-    try {
-      const res = await fetch(`${testBackend.replace(/\/$/, '')}/api/status`);
-      if (res.ok) messages.push('✓ Heroku Backend Online!');
-      else messages.push(`✗ Heroku returned ${res.status}`);
-    } catch (e) {
-      messages.push('✗ Heroku Unreachable');
-    }
-  }
-
-  if (messages.length === 0) {
-    resBox.textContent = 'Please enter a Gemini API Key or Heroku URL first.';
-    resBox.style.color = '#f59e0b';
-  } else {
-    resBox.innerHTML = messages.join('<br>');
-    resBox.style.color = messages.some(m => m.includes('✓')) ? '#10b981' : '#ef4444';
-  }
-}
-
-// ==========================================
-// 8. Workspace Explorer & ZIP Download
-// ==========================================
-function openWorkspaceTab() {
-  toggleDrawer(false);
-  const modal = document.getElementById('modal-workspace');
-  modal.classList.add('open');
-  const treeBox = document.getElementById('workspace-file-tree');
-  treeBox.innerHTML = '';
-
-  const fileNames = Object.keys(workspaceFiles);
-  if (fileNames.length === 0) {
-    treeBox.innerHTML = '<div style="color:#94a3b8; padding:8px;">Workspace is empty. Ask Kawat to build a bot!</div>';
-    return;
-  }
-
-  fileNames.sort().forEach(path => {
-    const el = document.createElement('div');
-    el.className = 'file-tree-item';
-    el.innerHTML = `<span>📄</span> <span>${path}</span> <span style="margin-left:auto; font-size:11px; color:#64748b;">${workspaceFiles[path].length}B</span>`;
-    el.onclick = () => previewFile(path);
-    treeBox.appendChild(el);
-  });
-}
-
-function previewFile(path) {
-  const content = workspaceFiles[path];
-  if (content === undefined) return;
-  document.getElementById('preview-filename').textContent = path;
-  const codeEl = document.getElementById('preview-code');
-  codeEl.textContent = content;
-  document.getElementById('file-preview-box').style.display = 'block';
-  Prism.highlightElement(codeEl);
-}
-
-function closeFilePreview() {
-  document.getElementById('file-preview-box').style.display = 'none';
-}
-
-function clearWorkspaceFiles() {
-  if (confirm('Clear all workspace files?')) {
-    workspaceFiles = {};
-    saveWorkspace();
-    updateFileCounts();
-    openWorkspaceTab();
-  }
-}
-
-// Download ZIP (Works 100% Offline / Client-side with JSZip!)
-async function downloadZip() {
-  const fileNames = Object.keys(workspaceFiles);
-  if (fileNames.length === 0) {
-    alert('No files in workspace to download!');
-    return;
-  }
-
   try {
-    const zip = new JSZip();
-    for (const [path, content] of Object.entries(workspaceFiles)) {
-      zip.file(path, content);
+    const btnOpenDrawer = document.getElementById('btn-open-drawer');
+    if (btnOpenDrawer) btnOpenDrawer.onclick = () => toggleDrawer(true);
+
+    const btnCloseDrawer = document.getElementById('btn-close-drawer');
+    if (btnCloseDrawer) btnCloseDrawer.onclick = () => toggleDrawer(false);
+
+    const drawerOverlay = document.getElementById('drawer-overlay');
+    if (drawerOverlay) drawerOverlay.onclick = () => toggleDrawer(false);
+
+    const btnNewChat = document.getElementById('btn-new-chat');
+    if (btnNewChat) btnNewChat.onclick = startNewSession;
+
+    const btnModelSelect = document.getElementById('btn-model-select');
+    if (btnModelSelect) btnModelSelect.onclick = openBackendModal;
+
+    const promptInput = document.getElementById('prompt-input');
+    if (promptInput) {
+      promptInput.addEventListener('input', () => {
+        promptInput.style.height = 'auto';
+        promptInput.style.height = Math.min(promptInput.scrollHeight, 120) + 'px';
+      });
+      promptInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendPrompt();
+        }
+      });
     }
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'kawat_project.zip';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+
+    const btnSend = document.getElementById('btn-send');
+    if (btnSend) btnSend.onclick = sendPrompt;
+
+    const btnAttach = document.getElementById('btn-attach');
+    if (btnAttach) btnAttach.onclick = openWorkspaceTab;
+
+    const btnMic = document.getElementById('btn-mic');
+    if (btnMic) btnMic.onclick = triggerVoice;
   } catch (err) {
-    alert('Failed to generate ZIP: ' + err.message);
+    console.error("setupEventListeners error:", err);
   }
 }
 
-// ==========================================
-// 9. Voice Input
-// ==========================================
-function setupVoiceRecognition() {
-  const micBtn = document.getElementById('btn-mic');
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Robust App Bootloader (Runs whether DOM is already ready or loading)
+function initApp() {
+  try {
+    setupEventListeners();
+    updateUIFromState();
+    updateFileCounts();
 
-  if (SpeechRecognition) {
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'hi-IN';
-
-    micBtn.onclick = () => {
-      micBtn.style.color = '#ef4444';
-      recognition.start();
-    };
-
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      promptInput.value = (promptInput.value + ' ' + transcript).trim();
-      micBtn.style.color = '';
-    };
-
-    recognition.onerror = () => { micBtn.style.color = ''; };
-    recognition.onend = () => { micBtn.style.color = ''; };
-  } else {
-    micBtn.style.display = 'none';
+    if (ACTIVE_BACKEND || VERCEL_GATEWAY) {
+      resolveBackendAndConnect();
+    } else {
+      evaluateEngineStatus();
+    }
+  } catch (e) {
+    console.error("KAWAT init error:", e);
   }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
 }
