@@ -1,9 +1,9 @@
-/* KAWAT Mobile UI — ChatGPT / Gemini / Claude Aesthetic */
+/* KAWAT Mobile UI — Premium ChatGPT / Gemini / Claude Aesthetic */
 :root {
   --bg-main: #090d16;
   --bg-surface: #121826;
   --bg-surface-elevated: #1a2236;
-  --bg-pill: #1e273d;
+  --bg-pill: #1a2337;
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-focus: #3b82f6;
   --primary: #3b82f6;
@@ -54,9 +54,9 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(9, 13, 22, 0.85);
+  background: rgba(9, 13, 22, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   z-index: 50;
@@ -83,58 +83,40 @@ html, body {
 .model-badge-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-subtle);
-  padding: 6px 14px;
-  border-radius: 20px;
+  padding: 7px 14px;
+  border-radius: 22px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  max-width: 60%;
 }
 
-.model-badge-btn:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+.model-badge-btn:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.sparkle-icon {
-  background: var(--primary-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-size: 14px;
+.model-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chevron-down {
   color: var(--text-muted);
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.backend-pill-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  padding: 5px 10px;
-  border-radius: 16px;
-  color: var(--success);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .status-indicator-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 6px var(--success);
+  box-shadow: 0 0 8px var(--success);
+  flex-shrink: 0;
 }
 
 .status-indicator-dot.offline {
@@ -142,12 +124,17 @@ html, body {
   box-shadow: 0 0 6px var(--error);
 }
 
-.status-indicator-dot.connecting {
+.status-indicator-dot.checking {
   background: var(--warning);
   box-shadow: 0 0 6px var(--warning);
 }
 
-/* Side Navigation Drawer (ChatGPT style) */
+.status-indicator-dot.direct {
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+/* Side Navigation Drawer */
 .drawer-overlay {
   position: fixed;
   inset: 0;
@@ -275,8 +262,8 @@ html, body {
   transition: background 0.15s;
 }
 
-.drawer-nav-list li:hover {
-  background: rgba(255, 255, 255, 0.05);
+.drawer-nav-list li:active {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .nav-icon {
@@ -398,9 +385,37 @@ html, body {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  padding-bottom: 90px;
+  padding-bottom: 96px;
   display: flex;
   flex-direction: column;
+}
+
+/* Setup Alert Banner */
+.setup-alert-card {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(239, 68, 68, 0.1));
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.alert-icon { font-size: 20px; }
+.alert-content { flex: 1; }
+.alert-content h4 { font-size: 13px; font-weight: 700; color: #fbbf24; margin-bottom: 2px; }
+.alert-content p { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.btn-setup-now {
+  background: #f59e0b;
+  color: #000;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 /* Welcome Hero Screen */
@@ -436,7 +451,7 @@ html, body {
   color: var(--text-secondary);
   max-width: 320px;
   line-height: 1.5;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .suggestion-chips {
@@ -530,6 +545,9 @@ html, body {
 
 .tool-icon-pulse {
   font-size: 14px;
+}
+
+.tool-card.running .tool-icon-pulse {
   animation: toolPulse 1.5s infinite;
 }
 
@@ -583,14 +601,14 @@ html, body {
   overflow-x: auto;
 }
 
-/* Floating Bottom Pill Input Bar (ChatGPT & Gemini Fusion) */
+/* Floating Bottom Pill Input Bar */
 .bottom-bar-wrapper {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 8px 14px calc(var(--safe-bottom) + 8px);
-  background: linear-gradient(to top, rgba(9, 13, 22, 0.98) 70%, transparent);
+  padding: 6px 12px max(14px, var(--safe-bottom));
+  background: linear-gradient(to top, rgba(9, 13, 22, 0.98) 75%, transparent);
   z-index: 40;
 }
 
@@ -601,7 +619,7 @@ html, body {
   background: var(--bg-pill);
   border: 1px solid var(--border-subtle);
   border-radius: 28px;
-  padding: 6px 10px;
+  padding: 5px 8px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   max-width: 680px;
   margin: 0 auto;
@@ -725,6 +743,7 @@ html, body {
   color: var(--text-muted);
   font-size: 18px;
   cursor: pointer;
+  padding: 4px;
 }
 
 .modal-desc {
@@ -828,6 +847,24 @@ html, body {
 
 .file-tree-item:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.workspace-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.btn-sm-action {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .file-preview-box {
