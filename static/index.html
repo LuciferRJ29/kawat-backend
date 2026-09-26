@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>KAWAT AI — Autonomous Coding Agent</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#090d16" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <!-- Fonts & Highlighter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="dark-theme">
+
+  <!-- Mobile App Layout Container -->
+  <div class="app-layout">
+
+    <!-- Top App Bar (ChatGPT & Gemini Style) -->
+    <header class="app-header">
+      <button class="icon-btn-header" id="btn-open-drawer" aria-label="Open Navigation Drawer">
+        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.2" fill="none">
+          <line x1="4" y1="7" x2="20" y2="7"></line>
+          <line x1="4" y1="12" x2="16" y2="12"></line>
+          <line x1="4" y1="17" x2="20" y2="17"></line>
+        </svg>
+      </button>
+
+      <!-- Center Model Selector Pill (Claude / Gemini Style) -->
+      <div class="model-badge-btn" id="btn-model-select">
+        <span class="sparkle-icon">✦</span>
+        <span id="active-model-name">Gemini 2.0 Flash</span>
+        <svg class="chevron-down" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </div>
+
+      <div class="header-actions">
+        <!-- Backend Status Pill -->
+        <button class="backend-pill-btn" id="btn-open-backend-modal" title="Active Backend & Gateway">
+          <span class="status-indicator-dot" id="status-dot"></span>
+          <span class="gateway-text" id="status-label">Gateway</span>
+        </button>
+
+        <button class="icon-btn-header" id="btn-new-chat" aria-label="New Session" title="New Session">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Side Navigation Drawer (ChatGPT Image 2 & Gemini Image 4) -->
+    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <aside class="side-drawer" id="side-drawer">
+      <div class="drawer-header">
+        <div class="drawer-brand">
+          <div class="logo-box">⚡</div>
+          <span class="brand-text">KAWAT AGENT</span>
+        </div>
+        <button class="icon-btn-close" id="btn-close-drawer">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.2" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- New Chat Button inside Drawer (Gemini style) -->
+      <div class="drawer-new-chat">
+        <button class="btn-new-chat-pill" onclick="startNewSession()">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.2" fill="none">
+            <path d="M12 5v14M5 12h14"></path>
+          </svg>
+          <span>New Agent Task</span>
+        </button>
+      </div>
+
+      <!-- Navigation Sections -->
+      <div class="drawer-scroll">
+        <div class="drawer-section-title">WORKSPACE & TOOLS</div>
+        <ul class="drawer-nav-list">
+          <li onclick="openWorkspaceTab()">
+            <span class="nav-icon">📁</span>
+            <span class="nav-label">Workspace Files</span>
+            <span class="nav-count" id="drawer-file-count">0</span>
+          </li>
+          <li onclick="usePrompt('Create a production-ready Python Telegram bot in workspace with start, help and custom command handlers.')">
+            <span class="nav-icon">🤖</span>
+            <span class="nav-label">Build Telegram Bot</span>
+          </li>
+          <li onclick="usePrompt('Ask for my GitHub Personal Access Token and push the current workspace files into a new GitHub repository.')">
+            <span class="nav-icon">🐙</span>
+            <span class="nav-label">Push to GitHub</span>
+          </li>
+          <li onclick="downloadZip()">
+            <span class="nav-icon">📦</span>
+            <span class="nav-label">Download Workspace ZIP</span>
+          </li>
+        </ul>
+
+        <div class="drawer-section-title">ACTIVE GATEWAY</div>
+        <div class="gateway-info-box" onclick="openBackendModal()">
+          <div class="gateway-name">kawatai.vercel.app</div>
+          <div class="gateway-target" id="drawer-backend-target">Resolving Heroku URL...</div>
+          <div class="gateway-badge">Auto-Routed • No Rebuilds</div>
+        </div>
+
+        <div class="drawer-section-title">RECENT TASKS</div>
+        <div class="recents-list" id="recents-container">
+          <div class="recent-item active">Telegram Bot & File Modifier</div>
+        </div>
+      </div>
+
+      <!-- Drawer Bottom Profile Card -->
+      <div class="drawer-footer">
+        <div class="user-pill-footer" onclick="openSettingsModal()">
+          <div class="avatar-circle">K</div>
+          <div class="user-details">
+            <div class="user-name">Kawat User</div>
+            <div class="user-sub" id="footer-status">Autonomous Mode</div>
+          </div>
+          <span class="settings-gear">⚙️</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat & Interaction Feed -->
+    <main class="chat-container" id="chat-container">
+      
+      <!-- Welcome Hero Section (Shown on empty session, Gemini & Claude Style) -->
+      <div class="welcome-hero" id="welcome-hero">
+        <div class="sparkle-hero-logo">
+          <svg viewBox="0 0 100 100" class="hero-sparkle-svg">
+            <path d="M50 0 C50 30 70 50 100 50 C70 50 50 70 50 100 C50 70 30 50 0 50 C30 50 50 30 50 0 Z" fill="url(#heroGrad)" />
+            <defs>
+              <linearGradient id="heroGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#3b82f6" />
+                <stop offset="50%" stop-color="#8b5cf6" />
+                <stop offset="100%" stop-color="#ec4899" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1 class="hero-title">Any coding ideas to explore?</h1>
+        <p class="hero-subtitle">I don't just chat. I inspect files, edit code, run terminal commands, and push directly to GitHub.</p>
+
+        <!-- Quick Suggestion Chips (ChatGPT Image 1 Style) -->
+        <div class="suggestion-chips">
+          <button class="chip" onclick="usePrompt('Create a complete Python Telegram bot that echoes messages and has a /start command. Write all code to files.')">
+            <span class="chip-icon">🤖</span>
+            <span>Create Telegram Bot</span>
+          </button>
+          <button class="chip" onclick="usePrompt('Show me the files in the workspace and let me choose what to edit.')">
+            <span class="chip-icon">✏️</span>
+            <span>Modify Project File</span>
+          </button>
+          <button class="chip" onclick="usePrompt('Push the current project code to my GitHub repository. Ask me for my GitHub token.')">
+            <span class="chip-icon">🚀</span>
+            <span>Push to GitHub</span>
+          </button>
+          <button class="chip" onclick="usePrompt('Create a fast FastAPI backend server with /api/health and /api/items endpoints.')">
+            <span class="chip-icon">⚡</span>
+            <span>Build REST API</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Messages Feed (Populated dynamically) -->
+      <div class="messages-feed" id="messages-feed"></div>
+
+    </main>
+
+    <!-- Floating Bottom Input Bar (ChatGPT Image 1 & Gemini Image 3 Style) -->
+    <div class="bottom-bar-wrapper">
+      <div class="bottom-pill-container">
+        
+        <!-- Attachment / Tool Menu (+) Button -->
+        <button class="pill-btn-action" id="btn-attach" title="Attach Tool or File">
+          <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.4" fill="none">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+
+        <!-- Dynamic Auto-expanding Input Area -->
+        <textarea
+          id="prompt-input"
+          class="prompt-textarea"
+          rows="1"
+          placeholder="Ask Kawat Agent to build or edit..."
+          autocomplete="off"
+        ></textarea>
+
+        <!-- Voice Input Mic Button -->
+        <button class="pill-btn-action" id="btn-mic" title="Voice Input">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        </button>
+
+        <!-- Execute / Submit Button (Waveform or Send) -->
+        <button class="pill-btn-send" id="btn-send" title="Send Request">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Backend & Gateway Modal -->
+  <div class="modal-backdrop" id="modal-backend">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚡ Backend & Routing Settings</h3>
+        <button class="modal-close" onclick="closeModal('modal-backend')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Your app connects to <b>kawatai.vercel.app</b> which automatically routes requests to your active Heroku server.
+        </p>
+
+        <div class="setting-group">
+          <label>Vercel Discovery Gateway</label>
+          <input type="text" id="gateway-input" class="modal-input" value="https://kawatai.vercel.app" />
+        </div>
+
+        <div class="setting-group">
+          <label>Resolved Heroku Backend URL</label>
+          <input type="text" id="backend-input" class="modal-input" placeholder="Fetching from gateway..." />
+          <span class="input-subnote">When you change Heroku monthly, Vercel updates this automatically.</span>
+        </div>
+
+        <div class="setting-group">
+          <label>Gemini API Key</label>
+          <input type="password" id="api-key-input" class="modal-input" placeholder="AI Studio Key (optional if set in Heroku)" />
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="checkConnection()">🔄 Ping Backend</button>
+          <button class="btn-primary-modal" onclick="saveSettings()">Save & Reconnect</button>
+        </div>
+        <div id="conn-result" class="conn-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace File Viewer Modal -->
+  <div class="modal-backdrop" id="modal-workspace">
+    <div class="modal-card modal-large">
+      <div class="modal-header">
+        <h3>📁 Workspace Files</h3>
+        <button class="modal-close" onclick="closeModal('modal-workspace')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="file-tree" id="workspace-file-tree">Loading files...</div>
+        <div class="file-preview-box" id="file-preview-box" style="display:none;">
+          <div class="preview-header">
+            <span id="preview-filename">file.py</span>
+            <button class="btn-sm" onclick="closeFilePreview()">Close</button>
+          </div>
+          <pre><code id="preview-code" class="language-python"></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "KAWAT AI Agent",
+  "short_name": "KAWAT",
+  "description": "Autonomous AI Coding Agent for Mobile",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
